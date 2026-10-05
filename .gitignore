@@ -2,3 +2,12 @@ __pycache__/
 *.pyc
 .env
 .venv/
+
+# Local training dataset
+word_level/data/
+
+# Extra trained models
+word_level/models/bilstm_model.pt
+word_level/models/stgcn_model.pt
+word_level/models/stgcn_standard_model.pt
+word_level/models/stgcn_weighted_model.pt
