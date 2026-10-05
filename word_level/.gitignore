@@ -20,4 +20,4 @@ word_level/models/bilstm_model.pt
 word_level/models/stgcn_model.pt
 word_level/models/stgcn_standard_model.pt
 word_level/models/stgcn_weighted_model.pt
-"@ | Set-Content .gitignore
+"@ | Out-File -FilePath .gitignore -Encoding utf8
