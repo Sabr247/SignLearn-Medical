@@ -1,0 +1,33 @@
+BiLSTM WORD-LEVEL MODEL EVALUATION
+============================================================
+Validation Accuracy: 58.33%
+
+CLASSIFICATION REPORT
+              precision    recall  f1-score   support
+
+       HELLO       0.67      1.00      0.80         6
+        HELP       0.00      0.00      0.00         0
+       WATER       0.00      0.00      0.00         1
+        FOOD       0.00      0.00      0.00         1
+        PAIN       0.00      0.00      0.00         0
+      DOCTOR       0.00      0.00      0.00         2
+    MEDICINE       0.00      0.00      0.00         1
+    HOSPITAL       0.33      1.00      0.50         1
+         YES       0.00      0.00      0.00         0
+          NO       0.00      0.00      0.00         0
+
+    accuracy                           0.58        12
+   macro avg       0.10      0.20      0.13        12
+weighted avg       0.36      0.58      0.44        12
+
+CONFUSION MATRIX
+[[6 0 0 0 0 0 0 0 0 0]
+ [0 0 0 0 0 0 0 0 0 0]
+ [1 0 0 0 0 0 0 0 0 0]
+ [0 0 0 0 0 0 0 1 0 0]
+ [0 0 0 0 0 0 0 0 0 0]
+ [1 0 0 0 0 0 0 1 0 0]
+ [1 0 0 0 0 0 0 0 0 0]
+ [0 0 0 0 0 0 0 1 0 0]
+ [0 0 0 0 0 0 0 0 0 0]
+ [0 0 0 0 0 0 0 0 0 0]]
