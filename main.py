@@ -21,29 +21,7 @@ import json
 import time
 import threading
 import av
-from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
-
-RTC_CONFIGURATION = RTCConfiguration(
-    {"iceServers": [
-        {"urls": ["stun:stun.l.google.com:19302"]},
-        {"urls": ["stun:stun1.l.google.com:19302"]},
-        {
-            "urls": ["turn:openrelay.metered.ca:80"],
-            "username": "openrelayproject",
-            "credential": "openrelayproject"
-        },
-        {
-            "urls": ["turn:openrelay.metered.ca:443"],
-            "username": "openrelayproject",
-            "credential": "openrelayproject"
-        },
-        {
-            "urls": ["turn:openrelay.metered.ca:443?transport=tcp"],
-            "username": "openrelayproject",
-            "credential": "openrelayproject"
-        }
-    ]}
-)
+from streamlit_webrtc import VideoProcessorBase, RTCConfiguration
 
 
 # Suppress background logs
@@ -2026,7 +2004,7 @@ with tab_word_recognition:
 
 
     # ============================================================
-    # WEBCAM
+    # WEBCAM — client-side ONNX inference (no WebRTC)
     # ============================================================
     with right_col:
 
@@ -2039,20 +2017,371 @@ with tab_word_recognition:
             "Stand where your upper body and both hands are clearly visible."
         )
 
-        webrtc_streamer(
-            key=f"word-recognition-{target_word}",
-            video_processor_factory=lambda: WordVideoProcessor(target_word),
-            rtc_configuration=RTC_CONFIGURATION,
-            media_stream_constraints={
-                "video": {
-                    "width": {"ideal": 480},
-                    "height": {"ideal": 360},
-                    "facingMode": "user"
-                },
-                "audio": False
-            },
-            async_processing=True
-        )
+        # Serve the ONNX model as a base64 string so the browser can load it
+        onnx_path = os.path.join(BASE_DIR, "word_bilstm.onnx")
+        with open(onnx_path, "rb") as f:
+            onnx_b64 = base64.b64encode(f.read()).decode()
+
+        word_labels_json = json.dumps({
+            str(k): v for k, v in load_word_model()[1].items()
+        })
+
+        word_camera_html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js" crossorigin="anonymous"></script>
+<style>
+  body {{ margin:0; padding:0; background:#0f172a; color:#fff;
+         font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+         display:flex; flex-direction:column; align-items:center; }}
+  #container {{ position:relative; width:100%; max-width:520px; height:390px;
+                border-radius:14px; overflow:hidden;
+                box-shadow:0 8px 24px rgba(0,0,0,0.5);
+                border:2px solid #fe3004; background:#000; }}
+  #webcam {{ display:none; }}
+  #canvas {{ width:100%; height:100%; object-fit:cover; transform:scaleX(-1); }}
+  #hud {{ position:absolute; top:0; left:0; width:100%;
+          background:rgba(0,0,0,0.72); padding:10px 14px; box-sizing:border-box; }}
+  #target-label {{ font-size:11px; color:#9ca3af; text-transform:uppercase;
+                   letter-spacing:0.1em; }}
+  #target-word {{ font-size:20px; font-weight:700; color:#fff; }}
+  #status-bar {{ position:absolute; bottom:0; left:0; width:100%;
+                 padding:10px 14px; box-sizing:border-box;
+                 font-size:15px; font-weight:700; text-align:center;
+                 transition:background 0.3s; }}
+  .status-waiting {{ background:rgba(220,160,30,0.92); color:#fff; }}
+  .status-correct {{ background:rgba(0,180,80,0.92); color:#fff; }}
+  .status-wrong   {{ background:rgba(210,50,60,0.92); color:#fff; }}
+  #loading {{ position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+              color:#9ca3af; font-size:13px; text-align:center; }}
+</style>
+</head>
+<body>
+<div id="container">
+  <video id="webcam" playsinline autoplay></video>
+  <canvas id="canvas"></canvas>
+  <div id="hud">
+    <div id="target-label">Target Word</div>
+    <div id="target-word">{target_word.upper()}</div>
+  </div>
+  <div id="status-bar" class="status-waiting">Loading model...</div>
+  <div id="loading">⏳ Loading AI model...</div>
+</div>
+
+<script>
+const TARGET_WORD = "{target_word.lower()}";
+const LABELS = {word_labels_json};
+const ONNX_B64 = "{onnx_b64}";
+const N_FRAMES = 64;
+const N_LANDMARKS = 50;
+
+// Frame buffer: stores (50, 3) arrays
+let frameBuffer = [];
+let frameCount = 0;
+let ortSession = null;
+let isModelReady = false;
+
+// ── Status bar helper ───────────────────────────────────────────────────────
+function setStatus(msg, cls) {{
+  const bar = document.getElementById('status-bar');
+  bar.textContent = msg;
+  bar.className = 'status-' + cls;
+}}
+
+// ── Load ONNX model from embedded base64 ───────────────────────────────────
+async function loadModel() {{
+  try {{
+    const binary = atob(ONNX_B64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    ortSession = await ort.InferenceSession.create(bytes.buffer);
+    isModelReady = true;
+    document.getElementById('loading').style.display = 'none';
+    setStatus('SIGN NOW...', 'waiting');
+  }} catch(e) {{
+    setStatus('Model load failed: ' + e.message, 'wrong');
+  }}
+}}
+
+// ── Extract 50 landmarks from MediaPipe Holistic results ────────────────────
+function extractLandmarks(results) {{
+  const pts = new Float32Array(N_LANDMARKS * 3).fill(NaN);
+
+  function setLm(idx, lm, conf) {{
+    pts[idx*3]   = lm.x;
+    pts[idx*3+1] = lm.y;
+    pts[idx*3+2] = (conf !== undefined) ? conf : 1.0;
+  }}
+
+  // Pose landmarks
+  const pose = results.poseLandmarks;
+  if (pose && pose.length > 0) {{
+    setLm(1, pose[0], pose[0].visibility);  // nose
+    if (pose.length > 12) {{
+      setLm(0, {{                            // neck = shoulder midpoint
+        x: (pose[11].x + pose[12].x) / 2,
+        y: (pose[11].y + pose[12].y) / 2
+      }}, 1.0);
+    }}
+    const poseMap = [11,12,13,14,15,16];
+    for (let i=0; i<poseMap.length; i++) {{
+      const pi = poseMap[i];
+      if (pi < pose.length) setLm(2+i, pose[pi], pose[pi].visibility);
+    }}
+  }}
+
+  // Left hand (landmarks 8–28)
+  const lh = results.leftHandLandmarks;
+  if (lh) for (let i=0; i<Math.min(21, lh.length); i++) setLm(8+i, lh[i], 1.0);
+
+  // Right hand (landmarks 29–49)
+  const rh = results.rightHandLandmarks;
+  if (rh) for (let i=0; i<Math.min(21, rh.length); i++) setLm(29+i, rh[i], 1.0);
+
+  return pts;  // Float32Array of length 150 (50 * 3)
+}}
+
+// ── Fill NaN gaps with linear interpolation ─────────────────────────────────
+function fillShortGaps(arr, maxGap) {{
+  const n = arr.length;
+  let i = 0;
+  while (i < n) {{
+    if (!isNaN(arr[i])) {{ i++; continue; }}
+    let j = i;
+    while (j < n && isNaN(arr[j])) j++;
+    if (i > 0 && j < n && (j - i) <= maxGap) {{
+      const v0 = arr[i-1], v1 = arr[j];
+      for (let k=i; k<j; k++) arr[k] = v0 + (v1 - v0) * (k-i+1) / (j-i+1);
+    }}
+    i = j;
+  }}
+  return arr;
+}}
+
+function fillAll(arr) {{
+  const valid = [];
+  for (let i=0; i<arr.length; i++) if (!isNaN(arr[i])) valid.push([i, arr[i]]);
+  if (valid.length === 0) return arr;
+  for (let i=0; i<arr.length; i++) {{
+    if (!isNaN(arr[i])) continue;
+    if (i < valid[0][0]) {{ arr[i] = valid[0][1]; continue; }}
+    if (i > valid[valid.length-1][0]) {{ arr[i] = valid[valid.length-1][1]; continue; }}
+    for (let k=0; k<valid.length-1; k++) {{
+      if (i > valid[k][0] && i < valid[k+1][0]) {{
+        const t = (i - valid[k][0]) / (valid[k+1][0] - valid[k][0]);
+        arr[i] = valid[k][1] + t * (valid[k+1][1] - valid[k][1]);
+        break;
+      }}
+    }}
+  }}
+  return arr;
+}}
+
+// ── Resample T frames → N_FRAMES using linear interp ────────────────────────
+function resample(frames, T) {{
+  const out = new Float32Array(N_FRAMES * N_LANDMARKS * 3);
+  for (let fi=0; fi<N_FRAMES; fi++) {{
+    const srcF = fi * (T-1) / (N_FRAMES-1);
+    const f0 = Math.min(Math.floor(srcF), T-1);
+    const f1 = Math.min(f0+1, T-1);
+    const alpha = srcF - f0;
+    for (let li=0; li<N_LANDMARKS*3; li++) {{
+      out[fi*N_LANDMARKS*3 + li] =
+        frames[f0*N_LANDMARKS*3 + li] * (1-alpha) +
+        frames[f1*N_LANDMARKS*3 + li] * alpha;
+    }}
+  }}
+  return out;
+}}
+
+// ── Preprocessing: matches Python process_raw() ─────────────────────────────
+function processRaw(buffer) {{
+  const T = buffer.length;
+  if (T < 5) return null;
+
+  // Flatten buffer to (T, 150)
+  let flat = new Float32Array(T * N_LANDMARKS * 3);
+  for (let t=0; t<T; t++) flat.set(buffer[t], t * N_LANDMARKS * 3);
+
+  // Per-channel fill for pose landmarks (0-7)
+  for (let p=0; p<8; p++) {{
+    for (let c=0; c<2; c++) {{
+      const col = new Float32Array(T);
+      for (let t=0; t<T; t++) col[t] = flat[t*N_LANDMARKS*3 + p*3 + c];
+      const filled = fillAll(Array.from(col));
+      for (let t=0; t<T; t++) flat[t*N_LANDMARKS*3 + p*3 + c] = filled[t];
+    }}
+  }}
+
+  // Compute shoulder width for scale, check pose is valid
+  let validPose = false;
+  const shoulderWidths = [];
+  for (let t=0; t<T; t++) {{
+    const neckX = flat[t*N_LANDMARKS*3 + 0*3];
+    if (!isNaN(neckX)) {{
+      validPose = true;
+      const ls = [flat[t*N_LANDMARKS*3+2*3], flat[t*N_LANDMARKS*3+2*3+1]];
+      const rs = [flat[t*N_LANDMARKS*3+3*3], flat[t*N_LANDMARKS*3+3*3+1]];
+      if (!isNaN(ls[0]) && !isNaN(rs[0])) {{
+        const dx = ls[0]-rs[0], dy = ls[1]-rs[1];
+        shoulderWidths.push(Math.sqrt(dx*dx+dy*dy));
+      }}
+    }}
+  }}
+  if (!validPose || shoulderWidths.length === 0) return null;
+
+  // Median shoulder width
+  shoulderWidths.sort((a,b)=>a-b);
+  const scale = shoulderWidths[Math.floor(shoulderWidths.length/2)];
+  if (scale < 1e-4) return null;
+
+  // Translate to neck, scale by shoulder width
+  for (let t=0; t<T; t++) {{
+    const base = t * N_LANDMARKS * 3;
+    const neckX = flat[base + 0*3];
+    const neckY = flat[base + 0*3 + 1];
+    for (let p=0; p<N_LANDMARKS; p++) {{
+      flat[base + p*3]     = (flat[base + p*3]     - neckX) / scale;
+      flat[base + p*3 + 1] = (flat[base + p*3 + 1] - neckY) / scale;
+    }}
+  }}
+
+  // Fill short gaps in hand/body (landmarks 8-49)
+  for (let p=8; p<N_LANDMARKS; p++) {{
+    for (let c=0; c<2; c++) {{
+      const col = new Float32Array(T);
+      for (let t=0; t<T; t++) col[t] = flat[t*N_LANDMARKS*3 + p*3 + c];
+      const filled = fillShortGaps(Array.from(col), 5);
+      for (let t=0; t<T; t++) flat[t*N_LANDMARKS*3 + p*3 + c] = filled[t];
+    }}
+  }}
+
+  // Replace remaining NaN with 0
+  for (let i=0; i<flat.length; i++) if (isNaN(flat[i])) flat[i] = 0;
+
+  // Trim: find frames where either hand is present
+  const leftOk = new Array(T).fill(false);
+  const rightOk = new Array(T).fill(false);
+  for (let t=0; t<T; t++) {{
+    const base = t * N_LANDMARKS * 3;
+    leftOk[t]  = !isNaN(buffer[t][8*3]);
+    rightOk[t] = !isNaN(buffer[t][29*3]);
+  }}
+  const handsAny = leftOk.map((l,i)=>l||rightOk[i]);
+  const firstHand = handsAny.indexOf(true);
+  const lastHand  = handsAny.lastIndexOf(true);
+  const pad = 3;
+  const start = firstHand >= 0 ? Math.max(0, firstHand - pad) : 0;
+  const end   = lastHand  >= 0 ? Math.min(T, lastHand + pad + 1) : T;
+  const trimLen = end - start;
+
+  // Extract trimmed slice
+  const trimmed = new Float32Array(trimLen * N_LANDMARKS * 3);
+  for (let t=0; t<trimLen; t++) {{
+    trimmed.set(flat.subarray((start+t)*N_LANDMARKS*3, (start+t)*N_LANDMARKS*3+N_LANDMARKS*3), t*N_LANDMARKS*3);
+  }}
+
+  // Resample to N_FRAMES
+  const resampled = resample(trimmed, trimLen);
+
+  // Reshape to (3, 64, 50) — channels first, matching PyTorch model input
+  // resampled is (64, 50, 3) in row-major order
+  // We need to transpose to (3, 64, 50)
+  const result = new Float32Array(3 * N_FRAMES * N_LANDMARKS);
+  for (let f=0; f<N_FRAMES; f++) {{
+    for (let l=0; l<N_LANDMARKS; l++) {{
+      for (let c=0; c<3; c++) {{
+        result[c * N_FRAMES * N_LANDMARKS + f * N_LANDMARKS + l] =
+          resampled[f * N_LANDMARKS * 3 + l * 3 + c];
+      }}
+    }}
+  }}
+  return result;
+}}
+
+// ── Softmax ─────────────────────────────────────────────────────────────────
+function softmax(logits) {{
+  const max = Math.max(...logits);
+  const exp = logits.map(v => Math.exp(v - max));
+  const sum = exp.reduce((a,b) => a+b, 0);
+  return exp.map(v => v/sum);
+}}
+
+// ── Run ONNX inference ───────────────────────────────────────────────────────
+async function runInference() {{
+  if (!isModelReady || frameBuffer.length < 30) return;
+
+  const input = processRaw(frameBuffer.slice());
+  if (!input) return;
+
+  try {{
+    const tensor = new ort.Tensor('float32', input, [1, 3, N_FRAMES, N_LANDMARKS]);
+    const results = await ortSession.run({{ input: tensor }});
+    const logits = Array.from(results.output.data);
+    const probs = softmax(logits);
+    const predIdx = probs.indexOf(Math.max(...probs));
+    const confidence = probs[predIdx];
+    const predWord = LABELS[predIdx] || "unknown";
+    const confPct = (confidence * 100).toFixed(1);
+
+    if (predWord === TARGET_WORD && confidence >= 0.50) {{
+      setStatus('✅ CORRECT! ' + predWord.toUpperCase() + ' — ' + confPct + '%', 'correct');
+    }} else if (confidence >= 0.50) {{
+      setStatus('❌ TRY AGAIN — Detected: ' + predWord.toUpperCase() + ' (' + confPct + '%)', 'wrong');
+    }} else {{
+      setStatus('SIGN NOW... (' + predWord.toUpperCase() + ' ' + confPct + '%)', 'waiting');
+    }}
+  }} catch(e) {{
+    console.error('Inference error:', e);
+  }}
+}}
+
+// ── MediaPipe Holistic setup ─────────────────────────────────────────────────
+const holistic = new Holistic({{locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${{f}}`}});
+holistic.setOptions({{
+  modelComplexity: 1,
+  smoothLandmarks: true,
+  minDetectionConfidence: 0.3,
+  minTrackingConfidence: 0.3
+}});
+
+holistic.onResults(results => {{
+  frameCount++;
+  const lm = extractLandmarks(results);
+  frameBuffer.push(lm);
+  if (frameBuffer.length > 120) frameBuffer.shift();
+
+  // Draw camera to canvas
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width = results.image.width;
+  canvas.height = results.image.height;
+  ctx.drawImage(results.image, 0, 0);
+
+  // Run inference every 30 frames
+  if (frameCount % 30 === 0 && isModelReady) runInference();
+}});
+
+// ── Start camera ─────────────────────────────────────────────────────────────
+const videoEl = document.getElementById('webcam');
+const camera = new Camera(videoEl, {{
+  onFrame: async () => {{ await holistic.send({{image: videoEl}}); }},
+  width: 480,
+  height: 360
+}});
+
+loadModel().then(() => camera.start().catch(e => {{
+  setStatus('Camera error: ' + e.message, 'wrong');
+}}));
+</script>
+</body>
+</html>
+"""
+        components.html(word_camera_html, height=420)
 
 
    # ---------- PRACTICE TIPS ----------
