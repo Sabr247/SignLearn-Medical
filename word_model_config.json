@@ -1,0 +1,28 @@
+{
+  "sequence_length": 64,
+  "num_landmarks": 50,
+  "num_channels": 3,
+  "num_classes": 20,
+  "labels": {
+    "0": "answer",
+    "1": "book",
+    "2": "class",
+    "3": "computer",
+    "4": "friend",
+    "5": "help",
+    "6": "homework",
+    "7": "learn",
+    "8": "library",
+    "9": "listen",
+    "10": "paper",
+    "11": "pencil",
+    "12": "read",
+    "13": "school",
+    "14": "student",
+    "15": "study",
+    "16": "teacher",
+    "17": "test",
+    "18": "understand",
+    "19": "write"
+  }
+}
