@@ -1954,9 +1954,9 @@ with tab_word_recognition:
         )
 
         reference_gif = os.path.join(
-            WORD_REFERENCE_DIR,
-            f"{target_word}_reference.gif"
-        )
+    WORD_REFERENCE_DIR,
+    f"{target_word.upper()}_reference.gif"
+)
 
         if os.path.exists(reference_gif):
 
