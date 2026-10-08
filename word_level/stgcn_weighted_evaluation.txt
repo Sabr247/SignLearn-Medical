@@ -1,0 +1,34 @@
+WEIGHTED ST-GCN EVALUATION
+============================================================
+
+Validation Accuracy: 46.67%
+
+Classification Report:
+              precision    recall  f1-score   support
+
+       HELLO       0.75      0.38      0.50         8
+        HELP       0.00      0.00      0.00         3
+       WATER       1.00      1.00      1.00         2
+        FOOD       1.00      0.25      0.40         4
+        PAIN       0.40      0.67      0.50         3
+      DOCTOR       0.00      0.00      0.00         1
+    MEDICINE       0.67      1.00      0.80         2
+    HOSPITAL       0.33      1.00      0.50         1
+         YES       0.33      0.25      0.29         4
+          NO       0.50      1.00      0.67         2
+
+    accuracy                           0.47        30
+   macro avg       0.50      0.55      0.47        30
+weighted avg       0.57      0.47      0.46        30
+
+Confusion Matrix:
+[[3 0 0 0 1 1 0 0 2 1]
+ [0 0 0 0 0 2 1 0 0 0]
+ [0 0 2 0 0 0 0 0 0 0]
+ [1 0 0 1 1 0 0 1 0 0]
+ [0 0 0 0 2 0 0 1 0 0]
+ [0 1 0 0 0 0 0 0 0 0]
+ [0 0 0 0 0 0 2 0 0 0]
+ [0 0 0 0 0 0 0 1 0 0]
+ [0 0 0 0 1 1 0 0 1 1]
+ [0 0 0 0 0 0 0 0 0 2]]

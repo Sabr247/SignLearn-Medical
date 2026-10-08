@@ -1,0 +1,68 @@
+STANDARD ST-GCN WORD-LEVEL EVALUATION
+============================================================
+Validation Accuracy: 50.00%
+
+CLASSIFICATION REPORT
+------------------------------------------------------------
+              precision    recall  f1-score   support
+
+       HELLO       0.42      0.83      0.56         6
+        HELP       1.00      0.33      0.50         3
+       WATER       0.50      0.33      0.40         3
+        FOOD       0.50      0.50      0.50         2
+        PAIN       0.67      0.67      0.67         3
+      DOCTOR       0.67      0.67      0.67         3
+    MEDICINE       1.00      0.33      0.50         3
+    HOSPITAL       0.33      0.33      0.33         3
+         YES       0.00      0.00      0.00         2
+          NO       0.50      0.50      0.50         2
+
+    accuracy                           0.50        30
+   macro avg       0.56      0.45      0.46        30
+weighted avg       0.57      0.50      0.48        30
+
+CONFUSION MATRIX
+------------------------------------------------------------
+5 0 0 0 0 0 0 0 0 1
+1 1 0 0 0 1 0 0 0 0
+2 0 1 0 0 0 0 0 0 0
+0 0 0 1 0 0 0 1 0 0
+0 0 0 0 2 0 0 1 0 0
+1 0 0 0 0 2 0 0 0 0
+0 0 1 0 1 0 1 0 0 0
+1 0 0 1 0 0 0 1 0 0
+2 0 0 0 0 0 0 0 0 0
+0 0 0 0 0 0 0 0 1 1
+
+PREDICTION DETAILS
+------------------------------------------------------------
+Actual: PAIN       Predicted: PAIN       CORRECT
+Actual: FOOD       Predicted: FOOD       CORRECT
+Actual: PAIN       Predicted: HOSPITAL   WRONG
+Actual: DOCTOR     Predicted: HELLO      WRONG
+Actual: HELLO      Predicted: HELLO      CORRECT
+Actual: MEDICINE   Predicted: PAIN       WRONG
+Actual: DOCTOR     Predicted: DOCTOR     CORRECT
+Actual: HOSPITAL   Predicted: FOOD       WRONG
+Actual: MEDICINE   Predicted: WATER      WRONG
+Actual: HELLO      Predicted: HELLO      CORRECT
+Actual: FOOD       Predicted: HOSPITAL   WRONG
+Actual: HELLO      Predicted: HELLO      CORRECT
+Actual: HOSPITAL   Predicted: HOSPITAL   CORRECT
+Actual: WATER      Predicted: HELLO      WRONG
+Actual: HELLO      Predicted: HELLO      CORRECT
+Actual: NO         Predicted: NO         CORRECT
+Actual: MEDICINE   Predicted: MEDICINE   CORRECT
+Actual: PAIN       Predicted: PAIN       CORRECT
+Actual: YES        Predicted: HELLO      WRONG
+Actual: HELLO      Predicted: HELLO      CORRECT
+Actual: WATER      Predicted: HELLO      WRONG
+Actual: HOSPITAL   Predicted: HELLO      WRONG
+Actual: WATER      Predicted: WATER      CORRECT
+Actual: NO         Predicted: YES        WRONG
+Actual: YES        Predicted: HELLO      WRONG
+Actual: DOCTOR     Predicted: DOCTOR     CORRECT
+Actual: HELP       Predicted: HELLO      WRONG
+Actual: HELP       Predicted: HELP       CORRECT
+Actual: HELLO      Predicted: NO         WRONG
+Actual: HELP       Predicted: DOCTOR     WRONG
