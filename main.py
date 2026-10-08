@@ -713,7 +713,9 @@ class WordVideoProcessor(VideoProcessorBase):
 
         self.model, self.idx_to_word = load_word_model()
 
-        self.frame_buffer = deque(maxlen=96)
+        # Keep enough frames for the model,
+        # but avoid an unnecessarily large buffer.
+        self.frame_buffer = deque(maxlen=64)
 
         self.frame_count = 0
 
@@ -723,7 +725,10 @@ class WordVideoProcessor(VideoProcessorBase):
 
         self.lock = threading.Lock()
 
+        # --------------------------------------------------------
         # MediaPipe Holistic
+        # --------------------------------------------------------
+
         base_options = python.BaseOptions(
             model_asset_path=HOLISTIC_TASK_FILE
         )
@@ -737,6 +742,10 @@ class WordVideoProcessor(VideoProcessorBase):
             options
         )
 
+        # Process MediaPipe only every 2nd frame.
+        # This reduces CPU usage and improves camera smoothness.
+        self.process_every_n_frames = 2
+
 
     def _make_result(self, prediction, confidence, status):
 
@@ -747,24 +756,38 @@ class WordVideoProcessor(VideoProcessorBase):
 
     def recv(self, frame):
 
+        # --------------------------------------------------------
+        # Get camera frame
+        # --------------------------------------------------------
+
         img = frame.to_ndarray(format="bgr24")
 
-        # Convert BGR → RGB
-        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-
-        mp_image = mp.Image(
-            image_format=mp.ImageFormat.SRGB,
-            data=rgb
-        )
-
-        # MediaPipe detection
-        result = self.detector.detect(mp_image)
-
-        landmarks = tasks_result_to_landmarks(result)
-
-        self.frame_buffer.append(landmarks)
-
         self.frame_count += 1
+
+        # --------------------------------------------------------
+        # MediaPipe processing
+        #
+        # Only process every 2nd frame.
+        # This allows the camera stream to feel more responsive.
+        # --------------------------------------------------------
+
+        if self.frame_count % self.process_every_n_frames == 0:
+
+            rgb = cv2.cvtColor(
+                img,
+                cv2.COLOR_BGR2RGB
+            )
+
+            mp_image = mp.Image(
+                image_format=mp.ImageFormat.SRGB,
+                data=rgb
+            )
+
+            result = self.detector.detect(mp_image)
+
+            landmarks = tasks_result_to_landmarks(result)
+
+            self.frame_buffer.append(landmarks)
 
 
         # --------------------------------------------------------
@@ -773,7 +796,7 @@ class WordVideoProcessor(VideoProcessorBase):
 
         if (
             len(self.frame_buffer) >= 30
-            and self.frame_count % 20 == 0
+            and self.frame_count % 30 == 0
         ):
 
             try:
@@ -787,9 +810,6 @@ class WordVideoProcessor(VideoProcessorBase):
                     trim=True,
                     pad=3
                 )
-
-                # sample:
-                # (3, 64, 50)
 
                 x = torch.tensor(
                     sample,
@@ -810,7 +830,9 @@ class WordVideoProcessor(VideoProcessorBase):
                         dim=1
                     )
 
-                confidence = float(confidence.item())
+                confidence = float(
+                    confidence.item()
+                )
 
                 predicted_idx = int(
                     predicted_idx.item()
@@ -852,9 +874,14 @@ class WordVideoProcessor(VideoProcessorBase):
                     )
 
 
-            except Exception:
+            except Exception as e:
 
-                pass
+                # Print the actual error instead of
+                # silently hiding it.
+                print(
+                    "WORD RECOGNITION ERROR:",
+                    repr(e)
+                )
 
 
         # ========================================================
@@ -864,7 +891,10 @@ class WordVideoProcessor(VideoProcessorBase):
         height, width = img.shape[:2]
 
 
+        # --------------------------------------------------------
         # Dark top panel
+        # --------------------------------------------------------
+
         overlay = img.copy()
 
         cv2.rectangle(
@@ -884,7 +914,10 @@ class WordVideoProcessor(VideoProcessorBase):
         )
 
 
+        # --------------------------------------------------------
         # Target
+        # --------------------------------------------------------
+
         cv2.putText(
             img,
             f"TARGET: {self.target_word}",
@@ -897,10 +930,20 @@ class WordVideoProcessor(VideoProcessorBase):
         )
 
 
+        # --------------------------------------------------------
         # Prediction
+        # --------------------------------------------------------
+
+        with self.lock:
+
+            prediction = self.prediction
+            confidence = self.confidence
+            status = self.status
+
+
         cv2.putText(
             img,
-            f"AI: {self.prediction}",
+            f"AI: {prediction}",
             (20, 68),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.75,
@@ -914,16 +957,8 @@ class WordVideoProcessor(VideoProcessorBase):
         # RESULT MESSAGE
         # ========================================================
 
-        with self.lock:
-
-            status = self.status
-            confidence = self.confidence
-            prediction = self.prediction
-
-
         if status == "correct":
 
-            # Green result banner
             cv2.rectangle(
                 img,
                 (15, height - 105),
@@ -934,7 +969,7 @@ class WordVideoProcessor(VideoProcessorBase):
 
             cv2.putText(
                 img,
-                "✓ CORRECT!",
+                "CORRECT!",
                 (35, height - 68),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 1.0,
@@ -957,7 +992,6 @@ class WordVideoProcessor(VideoProcessorBase):
 
         elif status == "wrong":
 
-            # Red result banner
             cv2.rectangle(
                 img,
                 (15, height - 105),
@@ -968,7 +1002,7 @@ class WordVideoProcessor(VideoProcessorBase):
 
             cv2.putText(
                 img,
-                "✕ TRY AGAIN",
+                "TRY AGAIN",
                 (35, height - 68),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.95,
@@ -991,7 +1025,6 @@ class WordVideoProcessor(VideoProcessorBase):
 
         else:
 
-            # Yellow instruction banner
             cv2.rectangle(
                 img,
                 (15, height - 85),
@@ -1012,21 +1045,15 @@ class WordVideoProcessor(VideoProcessorBase):
             )
 
 
-        # Return frame
+        # --------------------------------------------------------
+        # Return camera frame
+        # --------------------------------------------------------
+
         return av.VideoFrame.from_ndarray(
             img,
             format="bgr24"
         )
-
-HAND_CONNECTIONS = [
-    (0, 1), (1, 2), (2, 3), (3, 4),
-    (0, 5), (5, 6), (6, 7), (7, 8),
-    (0, 9), (9, 10), (10, 11), (11, 12),
-    (0, 13), (13, 14), (14, 15), (15, 16),
-    (0, 17), (17, 18), (18, 19), (19, 20),
-    (5, 9), (9, 13), (13, 17)
-]
-
+        
 # 4. SESSION STATE INITIALIZATION
 if "drills_data" not in st.session_state:
     try:
