@@ -1,0 +1,10 @@
+[deploy]
+healthcheckPath = "/"
+healthcheckTimeout = 300
+restartPolicyType = "on_failure"
+
+[[services]]
+name = "web"
+
+[services.variables]
+PORT = "8080"
