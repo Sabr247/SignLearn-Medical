@@ -94,19 +94,22 @@ model.eval()
 dummy_input = torch.zeros(1, 3, 64, 50, dtype=torch.float32)
 
 print("Exporting to ONNX...")
+# Use dynamo=False to force the legacy exporter which keeps all weights
+# embedded in a single .onnx file (no external .data sidecar file).
 torch.onnx.export(
     model,
     dummy_input,
     OUTPUT_FILE,
     export_params=True,
-    opset_version=14,
+    opset_version=12,
     do_constant_folding=True,
     input_names=["input"],
     output_names=["output"],
     dynamic_axes={
         "input": {0: "batch_size"},
         "output": {0: "batch_size"}
-    }
+    },
+    dynamo=False
 )
 
 print(f"Exported to: {OUTPUT_FILE}")
