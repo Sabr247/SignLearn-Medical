@@ -7,6 +7,11 @@ RUN apt-get update && apt-get install -y \
     libsm6 \
     libxext6 \
     libxrender-dev \
+    libegl1 \
+    libgles2 \
+    libgbm1 \
+    libx11-6 \
+    libxcb1 \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
